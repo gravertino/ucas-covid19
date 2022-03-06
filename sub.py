@@ -3,30 +3,31 @@ author: Les1ie
 mail: me@les1ie.com
 license: CC BY-NC-SA 3.0
 """
-import os
-import json
-import pytz
 import hashlib
+import json
+import os
 import smtplib
-import requests
-from time import sleep
+from datetime import datetime
+from email.mime.text import MIMEText
+from email.utils import formataddr
 from pathlib import Path
 from random import randint
-from datetime import datetime
-from email.utils import formataddr
-from email.mime.text import MIMEText
-from requests.adapters import HTTPAdapter
+from time import sleep
+
+import pytz
+import requests
+import schedule
 
 
 # 开启debug将会输出打卡填报的数据，关闭debug只会输出打卡成功或者失败，如果使用github actions，请务必设置该选项为False
-debug = False
+debug = True
 
 # 忽略网站的证书错误，这很不安全 :(
 verify_cert = True
 
 # 全局变量，如果使用自己的服务器运行请根据需要修改 ->以下变量<-
-user = "USERNAME"  # sep 账号
-passwd = r"PASSWORD"  # sep 密码
+user = ""  # sep 账号
+passwd = r""  # sep 密码
 api_key = ""  # 可选， server 酱的通知 api key
 
 # 可选，如果需要邮件通知，那么修改下面五行 :)
@@ -43,19 +44,9 @@ tg_bot_token = r""  # bot的token
 # 全局变量，使用自己的服务器运行请根据需要修改 ->以上变量<-
 
 # 如果检测到程序在 github actions 内运行，那么读取环境变量中的登录信息
-if os.environ.get('GITHUB_RUN_ID', None):
-    user = os.environ.get('SEP_USER_NAME', '')  # sep账号
-    passwd = os.environ.get('SEP_PASSWD', '')  # sep密码
-    api_key = os.environ.get('API_KEY', '')  # server酱的api，填了可以微信通知打卡结果，不填没影响
 
-    smtp_port = os.environ.get('SMTP_PORT', '465')  # 邮件服务器端口，默认为qq smtp服务器端口
-    smtp_server = os.environ.get('SMTP_SERVER', 'smtp.qq.com')  # 邮件服务器，默认为qq smtp服务器
-    sender_email = os.environ.get('SENDER_EMAIL', '')  # 发送通知打卡通知邮件的邮箱
-    sender_email_passwd = os.environ.get('SENDER_EMAIL_PASSWD', "")  # 发送通知打卡通知邮件的邮箱密码
-    receiver_email = os.environ.get('RECEIVER_EMAIL', '')  # 接收打卡通知邮件的邮箱
 
-    tg_chat_id = os.environ.get('TG_CHAT_ID', '')  # 和bot的chat_id
-    tg_bot_token = os.environ.get('TG_BOT_TOKEN', '')  # bot的token
+
 
 
 def login(s: requests.Session, username, password, cookie_file: Path):
@@ -69,6 +60,7 @@ def login(s: requests.Session, username, password, cookie_file: Path):
         # 测试cookie是否有效
         if get_daily(s) == False:
             print("cookie失效，进入登录流程")
+            
         else:
             print("cookie有效，跳过登录环节")
             return
@@ -77,23 +69,7 @@ def login(s: requests.Session, username, password, cookie_file: Path):
         "username": username,
         "password": password
     }
-
-    # 超时重试3次
-    s.mount('http://', HTTPAdapter(max_retries=3))
-    s.mount('https://', HTTPAdapter(max_retries=3))
-
-    try:
-        # 判断连接超时和读取超时的时间为30秒
-        r = s.post("https://app.ucas.ac.cn/uc/wap/login/check", data=payload, timeout=(30, 30))
-    except requests.exceptions.RequestException as e:
-        print("服务器连接异常", e)
-        message(api_key, sender_email, sender_email_passwd, receiver_email,
-                tg_bot_token, tg_chat_id, "健康打卡失败", "服务器连接异常，建议手动检查疫情防控打卡页面是否能够正常加载")
-
-    if r.status_code != 200:
-        print("服务器返回状态异常")
-        message(api_key, sender_email, sender_email_passwd, receiver_email,
-                tg_bot_token, tg_chat_id, "健康打卡失败", "服务器返回状态异常，建议手动检查疫情防控打卡页面是否能够正常加载")
+    r = s.post("https://app.ucas.ac.cn/uc/wap/login/check", data=payload)
 
     # print(r.text)
     if r.json().get('m') != "操作成功":
@@ -148,10 +124,10 @@ def submit(s: requests.Session, old: dict):
         'old_city': old['old_city'],
         'geo_api_infot': old['geo_api_infot'],
         'date': datetime.now(tz=pytz.timezone("Asia/Shanghai")).strftime("%Y-%m-%d"),
-        # 'fjsj': old['fjsj'],  # 返京时间# 2021.8.1 del
-        # 'ljrq': old['ljrq'],  # 离京日期 add@2021.1.24# 2021.8.1 del
-        # 'qwhd': old['qwhd'],  # 去往何地 add@2021.1.24# 2021.8.1 del
-        # 'chdfj': old['chdfj'],  # 从何地返京 add@2021.1.24# 2021.8.1 del
+        'fjsj': old['fjsj'],  # 返京时间# 2021.8.1 del
+        'ljrq': old['ljrq'],  # 离京日期 add@2021.1.24# 2021.8.1 del
+        'qwhd': old['qwhd'],  # 去往何地 add@2021.1.24# 2021.8.1 del
+        'chdfj': old['chdfj'],  # 从何地返京 add@2021.1.24# 2021.8.1 del
         # 'jcbhrq': old['jcbhrq'], # del 2021.1.29 接触病患日期
         # 'glksrq': old['glksrq'], # del 2021.1.29 隔离开始日期
         # 'fxyy': old['fxyy'],# 2021.8.1 del
@@ -173,6 +149,7 @@ def submit(s: requests.Session, old: dict):
         message(api_key, sender_email, sender_email_passwd, receiver_email, tg_bot_token,
                 tg_chat_id, "每日健康打卡-{}".format(check_data_msg), "{}".format(new_daily))
         print("提交数据存在问题，请手动打卡，问题原因： {}".format(check_data_msg))
+        
         return
 
     r = s.post("https://app.ucas.ac.cn/ncov/api/default/save", data=new_daily)
@@ -205,8 +182,6 @@ def check_submit_data(data: dict):
     if int(data['tw']) > 4:
         msg.append("体温大于 37.3 度 ，请手动填报")
 
-    if data['jrsflj'] == '是':
-        msg.append("近日有离京经历，请手动填报")
 
     return ";".join(msg) if msg else None
 
@@ -257,16 +232,6 @@ def send_email(sender, mail_passwd, receiver, subject, msg):
             print(ex)
 
 
-def send_telegram_message(bot_token, chat_id, msg):
-    """
-    Telegram通知打卡结果
-    python-telegram-bot 只支持 python 3.6或更高的版本
-    此处使用时再导入以保证向后兼容 python 3.5；
-    如果要使用 tg 消息通知，请使用 python 3.6或更高的版本
-    """
-    import telegram 
-    bot = telegram.Bot(token=bot_token)
-    bot.send_message(chat_id=chat_id, text=msg)
 
 
 def report(username, password):
@@ -280,7 +245,7 @@ def report(username, password):
     s.headers.update(header)
 
     print(datetime.now(tz=pytz.timezone("Asia/Shanghai")).strftime("%Y-%m-%d %H:%M:%S %Z"))
-    for i in range(randint(10, 600), 0, -1):
+    for i in range(randint(10, 11), 0, -1):
         print("\r等待{}秒后填报".format(i), end='')
         sleep(1)
 
@@ -290,5 +255,11 @@ def report(username, password):
     submit(s, yesterday)
 
 
-if __name__ == "__main__":
-    report(username=user, password=passwd)
+
+schedule.every().day.at("09:06").do(report,username=user, password=passwd)
+report(username=user, password=passwd)
+while True:
+   
+    schedule.run_pending()
+    sleep(1800)
+    
