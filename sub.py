@@ -256,10 +256,5 @@ def report(username, password):
 
 
 
-schedule.every().day.at("09:06").do(report,username=user, password=passwd)
-report(username=user, password=passwd)
-while True:
-   
-    schedule.run_pending()
-    sleep(1800)
-    
+if __name__ == "__main__":
+    report(username=user, password=passwd)
