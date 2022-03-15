@@ -16,7 +16,7 @@ from time import sleep
 
 import pytz
 import requests
-import schedule
+# import schedule
 
 
 # 开启debug将会输出打卡填报的数据，关闭debug只会输出打卡成功或者失败，如果使用github actions，请务必设置该选项为False
